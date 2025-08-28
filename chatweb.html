@@ -391,25 +391,39 @@
           <input id="newRoomName" placeholder="New room name" style="flex:1;background:#101522;border:1px solid #283147;color:#e5e7eb;padding:12px;border-radius:12px;font-size:15px" />
           <button id="createRoom" class="btn" style="padding:12px 20px">Create</button>
         </div>
-        <div class="users-list" id="usersList" style="padding:12px;border-bottom:1px solid #22293a">
-          <div style="font-weight:600;color:var(--pri);margin-bottom:8px">All Users</div>
-          <div id="allUsers"></div>
+        <div class="users-list" id="usersList" style="padding:16px 12px;border-bottom:1px solid #22293a;background:var(--muted);">
+          <div style="font-weight:600;color:var(--pri);margin-bottom:8px;font-size:16px;letter-spacing:0.5px">All Users <span id="userCount" style="color:var(--ok);font-size:15px"></span></div>
+          <input id="findFriend" type="text" placeholder="Find friend by name or email..." style="width:100%;margin-bottom:10px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--input-bg);color:var(--text);font-size:14px">
+          <div id="allUsers" style="min-height:32px"></div>
         </div>
         <div class="rooms" id="rooms"></div>
     // Show all registered users in sidebar
     function showAllUsers() {
       const usersDiv = document.getElementById('allUsers');
+      const userCountSpan = document.getElementById('userCount');
+      if (!usersDiv) return;
       usersDiv.innerHTML = '<span style="color:var(--sub);font-size:13px">Loading...</span>';
       get(ref(db, 'users')).then(snap => {
         if (!snap.exists()) {
           usersDiv.innerHTML = '<span style="color:var(--sub);font-size:13px">No users found.</span>';
+          if(userCountSpan) userCountSpan.textContent = '';
           return;
         }
         const users = snap.val();
-        usersDiv.innerHTML = Object.values(users).map(u =>
+        const userArr = Object.values(users);
+        if(userCountSpan) userCountSpan.textContent = `(${userArr.length})`;
+
+        // Filter logic
+        const filterInput = document.getElementById('findFriend');
+        let filter = '';
+        if(filterInput) filter = filterInput.value.trim().toLowerCase();
+        const filtered = filter ? userArr.filter(u => (u.displayName||'').toLowerCase().includes(filter) || (u.email||'').toLowerCase().includes(filter)) : userArr;
+
+        usersDiv.innerHTML = filtered.map(u =>
           `<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px'>
             <div style='width:28px;height:28px;border-radius:50%;background:#334155;display:grid;place-items:center;font-weight:600;color:#fff'>${(u.displayName||u.email||'U')[0].toUpperCase()}</div>
             <span style='font-size:15px;color:var(--text)'>${u.displayName||u.email}</span>
+            <button class='add-friend-btn' data-uid='${u.uid}' style='margin-left:auto;padding:4px 10px;border-radius:8px;background:var(--pri);color:#fff;border:none;cursor:pointer;font-size:13px'>Add Friend</button>
           </div>`
         ).join('');
       });
@@ -418,6 +432,22 @@
     // Save user info on registration
     onAuthStateChanged(auth, async (user) => {
       // ...existing code...
+      showAllUsers();
+      // Add event listener for find friend search
+      const filterInput = document.getElementById('findFriend');
+      if(filterInput) {
+        filterInput.oninput = () => showAllUsers();
+      }
+    // Add Friend button handler (demo only, does not persist yet)
+    document.addEventListener('click', function(e) {
+      if(e.target && e.target.classList.contains('add-friend-btn')) {
+        const uid = e.target.getAttribute('data-uid');
+        if(uid) {
+          banner('Friend request sent to user: ' + uid);
+          // Here you can add logic to persist friend requests in DB
+        }
+      }
+    });
       if (user) {
         // Save user info to DB if not already present
         const userRef = ref(db, `users/${user.uid}`);
@@ -431,7 +461,6 @@
             });
           }
         });
-        showAllUsers();
       }
     });
         <div class="video-container">
@@ -683,6 +712,12 @@
         await set(rRef, payload);
         els.newRoomName.value = '';
         banner('Room created');
+        // Auto-select new room and close sidebar on mobile
+        selectRoom(null, rRef.key, { name });
+        if(window.innerWidth <= 900) {
+          document.getElementById('sidebar').classList.remove('show');
+          document.getElementById('sidebarOverlay').classList.remove('show');
+        }
       }catch(e){ console.error('createRoom failed', e); banner('Failed to create room: ' + (e.message||e)); }
     };
 
@@ -702,8 +737,15 @@
       // create a button element for the room; id attribute helps later updates
       const btn = document.createElement('button'); btn.id = `room-btn-${roomId}`;
       const roomName = room?.name || 'Room';
-      btn.innerHTML = `<div class=\"avatar\">${String(roomName[0]||'R').toUpperCase()}</div><div style=\"flex:1;margin-left:8px;\"><div class=\"room-name\">${roomName}</div><div class=\"presence\" id=\"presence-${roomId}\">—</div></div><div class=\"meta\"><div class=\"unread\" id=\"unread-${roomId}\" style=\"display:none\">0</div></div>`;
-      btn.onclick = (e)=> selectRoom(e, roomId, room);
+      btn.innerHTML = `<div class="avatar">${String(roomName[0]||'R').toUpperCase()}</div><div style="flex:1;margin-left:8px;"><div class="room-name">${roomName}</div><div class="presence" id="presence-${roomId}">—</div></div><div class="meta"><div class="unread" id="unread-${roomId}" style="display:none">0</div></div>`;
+      btn.onclick = (e)=> {
+        selectRoom(e, roomId, room);
+        // Close sidebar on mobile after selecting room
+        if(window.innerWidth <= 900) {
+          document.getElementById('sidebar').classList.remove('show');
+          document.getElementById('sidebarOverlay').classList.remove('show');
+        }
+      };
       els.rooms.appendChild(btn);
 
       onValue(ref(db, `roomPresence/${roomId}/count`), (s)=>{
